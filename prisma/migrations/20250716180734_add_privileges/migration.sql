@@ -1,0 +1,8 @@
+-- CreateTable
+CREATE TABLE "Privilege" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "title" TEXT NOT NULL,
+    "details" TEXT NOT NULL,
+    "link" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

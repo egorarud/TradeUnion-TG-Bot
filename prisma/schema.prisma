@@ -17,4 +17,12 @@ model User {
   phone     String
   createdAt DateTime @default(now())
   // Добавьте другие поля по необходимости
+}
+
+model Privilege {
+  id        Int      @id @default(autoincrement())
+  title     String
+  details   String
+  link      String?   // ссылка на сайт или PDF
+  createdAt DateTime @default(now())
 } 

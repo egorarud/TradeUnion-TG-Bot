@@ -1,4 +1,5 @@
 const { Markup } = require('telegraf');
+const { getAllPrivileges } = require('../services/privilegeService');
 
 module.exports = (bot) => {
   bot.start((ctx) => {
@@ -16,16 +17,18 @@ module.exports = (bot) => {
     );
   });
 
-  bot.action('show_privileges', (ctx) => {
+  bot.action('show_privileges', async (ctx) => {
     ctx.answerCbQuery();
-    ctx.reply(
-      'Профсоюзная программа преференций:\n' +
-      '— Скидки на фитнес и спорт\n' +
-      '— Партнёрские предложения\n' +
-      '— Бонусы для членов профсоюза\n\n' +
-      'Актуальный список доступен на сайте: https://example.com/privileges\n' +
-      'Или скачайте PDF: [Скачать](https://example.com/privileges.pdf)',
-      { parse_mode: 'Markdown' }
-    );
+    const privileges = await getAllPrivileges();
+    if (!privileges.length) {
+      return ctx.reply('Список привилегий пока пуст.');
+    }
+    let text = '*Профсоюзная программа преференций:*\n\n';
+    privileges.forEach((p, i) => {
+      text += `${i + 1}. *${p.title}*\n${p.details}`;
+      if (p.link) text += `\n[Подробнее](${p.link})`;
+      text += '\n\n';
+    });
+    ctx.reply(text, { parse_mode: 'Markdown' });
   });
 }; 
