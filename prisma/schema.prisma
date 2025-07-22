@@ -16,6 +16,8 @@ model User {
   fullName  String
   phone     String
   createdAt DateTime @default(now())
+  registrations EventRegistration[]
+  fitnessRegistrations FitnessRegistration[]
   // Добавьте другие поля по необходимости
 }
 
@@ -35,4 +37,50 @@ model Question {
   answer     String?
   createdAt  DateTime @default(now())
   answeredAt DateTime?
+}
+
+model Event {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String
+  date        DateTime
+  capacity    Int?
+  createdAt   DateTime @default(now())
+  registrations EventRegistration[]
+}
+
+model EventRegistration {
+  id        Int      @id @default(autoincrement())
+  event     Event    @relation(fields: [eventId], references: [id])
+  eventId   Int
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  comment   String?
+  createdAt DateTime @default(now())
+}
+
+model FitnessCenter {
+  id      Int      @id @default(autoincrement())
+  name    String
+  address String?
+  slots   FitnessSlot[]
+}
+
+model FitnessSlot {
+  id         Int      @id @default(autoincrement())
+  center     FitnessCenter @relation(fields: [centerId], references: [id])
+  centerId   Int
+  date       DateTime
+  type       String   // тип тренировки
+  capacity   Int
+  registrations FitnessRegistration[]
+}
+
+model FitnessRegistration {
+  id        Int      @id @default(autoincrement())
+  slot      FitnessSlot @relation(fields: [slotId], references: [id])
+  slotId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  createdAt DateTime @default(now())
 }

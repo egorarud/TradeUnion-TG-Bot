@@ -1,6 +1,9 @@
 const { Markup } = require('telegraf');
 const { getAllPrivileges } = require('../services/privilegeService');
 const { addQuestion, answerQuestion, getQuestionById } = require('../services/questionService');
+const { getUpcomingEvents } = require('../services/eventService');
+const prisma = require('../models');
+const { handleFitnessCommand, handleMyFitnessCommand } = require('./fitness');
 
 const userStates = {};
 const adminStates = {};
@@ -16,10 +19,66 @@ module.exports = (bot) => {
       '• Консультация по договору\n' +
       '• Обратная связь',
       Markup.inlineKeyboard([
+        [Markup.button.callback('Фитнес-центр', 'show_fitness')],
+        [Markup.button.callback('Мероприятия', 'show_events')],
         [Markup.button.callback('Узнать о привилегиях', 'show_privileges')],
         [Markup.button.callback('Задать вопрос', 'ask_question')]
       ])
     );
+  });
+
+  bot.action('show_events', async (ctx) => {
+    ctx.answerCbQuery();
+    await ctx.reply('Выберите действие:',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Мои мероприятия', 'my_events')],
+        [Markup.button.callback('Предстоящие мероприятия', 'upcoming_events')]
+      ])
+    );
+  });
+
+  // Кнопка 'Мои мероприятия'
+  bot.action('my_events', async (ctx) => {
+    ctx.answerCbQuery();
+    let user = await require('../models').user.findUnique({ where: { telegramId: String(ctx.from.id) } });
+    if (!user) {
+      return ctx.reply('Вы ещё не записаны ни на одно мероприятие.');
+    }
+    const regs = await require('../services/eventService').getUserUpcomingRegistrations(user.id);
+    if (!regs.length) {
+      return ctx.reply('У вас нет записей на будущие мероприятия.');
+    }
+    await ctx.reply('Ваши записи на мероприятия:');
+    for (const reg of regs) {
+      const event = reg.event;
+      const date = new Date(event.date).toLocaleString('ru-RU');
+      let text = `*${event.title}*\n${event.description}\nДата: ${date}`;
+      if (reg.comment) text += `\nКомментарий: ${reg.comment}`;
+      await ctx.replyWithMarkdown(text,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('Отменить запись', `cancel_reg_${reg.id}`)]
+        ])
+      );
+    }
+  });
+
+  // Кнопка 'Предстоящие мероприятия'
+  bot.action('upcoming_events', async (ctx) => {
+    ctx.answerCbQuery();
+    const events = await require('../services/eventService').getUpcomingEvents();
+    if (!events.length) {
+      return ctx.reply('Ближайших мероприятий нет.');
+    }
+    await ctx.reply('Список мероприятий:');
+    for (const event of events) {
+      const date = new Date(event.date).toLocaleString('ru-RU');
+      await ctx.replyWithMarkdown(
+        `*${event.title}*\n${event.description}\n\nДата: ${date}`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('Записаться', `register_event_${event.id}`)]
+        ])
+      );
+    }
   });
 
   bot.action('show_privileges', async (ctx) => {
@@ -103,5 +162,28 @@ module.exports = (bot) => {
     }
     ctx.reply(`Введите ответ на вопрос #${questionId} от @${question.userName || '-'}:\n${question.text}`);
     adminStates[ctx.from.id] = { questionId };
+  });
+
+  // Подменю фитнеса
+  bot.action('show_fitness', async (ctx) => {
+    ctx.answerCbQuery();
+    await ctx.reply('Выберите действие:',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Записаться на тренировку', 'fitness_signup')],
+        [Markup.button.callback('Мои записи', 'fitness_my')]
+      ])
+    );
+  });
+
+  // Кнопка "Записаться на тренировку"
+  bot.action('fitness_signup', async (ctx) => {
+    await ctx.answerCbQuery();
+    await handleFitnessCommand(ctx);
+  });
+
+  // Кнопка "Мои записи"
+  bot.action('fitness_my', async (ctx) => {
+    await ctx.answerCbQuery();
+    await handleMyFitnessCommand(ctx);
   });
 };
