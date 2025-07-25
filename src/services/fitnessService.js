@@ -86,6 +86,20 @@ async function deleteFitnessSlot(id) {
   return prisma.fitnessSlot.delete({ where: { id } });
 }
 
+async function getAllFitnessRegistrationsWithDetails() {
+  return prisma.fitnessRegistration.findMany({
+    include: {
+      user: true,
+      slot: {
+        include: {
+          center: true
+        }
+      }
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+}
+
 module.exports = {
   getAllFitnessCenters,
   getSlotsByCenter,
@@ -98,5 +112,6 @@ module.exports = {
   deleteFitnessCenter,
   createFitnessSlot,
   updateFitnessSlot,
-  deleteFitnessSlot
+  deleteFitnessSlot,
+  getAllFitnessRegistrationsWithDetails,
 }; 

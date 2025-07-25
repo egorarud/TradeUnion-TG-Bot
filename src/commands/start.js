@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const { getAllPrivileges } = require('../services/privilegeService');
-const { addQuestion, answerQuestion, getQuestionById } = require('../services/questionService');
+const { addQuestion, answerQuestion, getQuestionById, getUserQuestionsCountToday } = require('../services/questionService');
 const { getUpcomingEvents } = require('../services/eventService');
 const prisma = require('../models');
 const { handleFitnessCommand, handleMyFitnessCommand } = require('./fitness');
@@ -106,6 +106,12 @@ module.exports = (bot) => {
     // Пользователь задаёт вопрос
     if (userStates[ctx.from.id] === 'waiting_for_question') {
       const user = ctx.from;
+      const count = await getUserQuestionsCountToday(String(user.id));
+      if (count >= 10) {
+        ctx.reply('Вы уже задали 10 вопросов сегодня. Попробуйте снова завтра.');
+        userStates[ctx.from.id] = undefined;
+        return;
+      }
       const question = await addQuestion({
         userTgId: String(user.id),
         userName: user.username || user.first_name || '',

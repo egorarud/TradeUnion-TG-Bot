@@ -24,4 +24,17 @@ async function getQuestionById(id) {
   return prisma.question.findUnique({ where: { id } });
 }
 
-module.exports = { addQuestion, getUnansweredQuestions, answerQuestion, getQuestionById };
+async function getUserQuestionsCountToday(userTgId) {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return prisma.question.count({
+    where: {
+      userTgId,
+      createdAt: { gte: start, lt: end }
+    }
+  });
+}
+
+module.exports = { addQuestion, getUnansweredQuestions, answerQuestion, getQuestionById, getUserQuestionsCountToday };

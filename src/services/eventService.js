@@ -53,4 +53,11 @@ async function updateEvent(id, { title, description, date, capacity }) {
   });
 }
 
-module.exports = { getUpcomingEvents, getEventById, registerUserForEvent, getUserUpcomingRegistrations, cancelRegistration, createEvent, updateEvent }; 
+async function getEventRegistrationsWithUsers(eventId) {
+  return prisma.eventRegistration.findMany({
+    where: { eventId },
+    include: { user: true }
+  });
+}
+
+module.exports = { getUpcomingEvents, getEventById, registerUserForEvent, getUserUpcomingRegistrations, cancelRegistration, createEvent, updateEvent, getEventRegistrationsWithUsers }; 

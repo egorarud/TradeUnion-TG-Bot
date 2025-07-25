@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const ADMIN_IDS = [1068642847]; // Замените на реальные Telegram ID админов
-const { createEvent, getUpcomingEvents, getEventById, updateEvent } = require('../services/eventService');
+const { createEvent, getUpcomingEvents, getEventById, updateEvent, getEventRegistrationsWithUsers } = require('../services/eventService');
 const { getAllPrivileges, createPrivilege, updatePrivilege } = require('../services/privilegeService');
 const {
   getAllFitnessCenters,
@@ -11,8 +11,10 @@ const {
   createFitnessSlot,
   updateFitnessSlot,
   deleteFitnessSlot,
-  getSlotById
+  getSlotById,
+  getAllFitnessRegistrationsWithDetails
 } = require('../services/fitnessService');
+const ExcelJS = require('exceljs');
 
 const adminStates = {};
 
@@ -309,6 +311,18 @@ module.exports = (bot) => {
     if (state.step === 'edit_capacity') {
       if (ctx.message.text !== '-') state.event.capacity = Number(ctx.message.text);
       await updateEvent(state.eventId, state.event);
+      // Уведомление пользователей
+      const regs = await getEventRegistrationsWithUsers(state.eventId);
+      for (const reg of regs) {
+        if (reg.user && reg.user.telegramId) {
+          try {
+            await ctx.telegram.sendMessage(
+              reg.user.telegramId,
+              `Внимание! Мероприятие "${state.event.title}" было обновлено администратором. Проверьте детали мероприятия.`
+            );
+          } catch (e) { /* ignore errors for users who blocked bot */ }
+        }
+      }
       adminStates[ctx.from.id] = undefined;
       return ctx.reply('Мероприятие обновлено!');
     }
@@ -407,7 +421,31 @@ module.exports = (bot) => {
   bot.action('admin_export', async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
     await ctx.editMessageText('Экспорт записей в .xlsx (фитнес, мероприятия)');
-    // Здесь будет логика экспорта
+    // Экспорт фитнес-записей
+    const regs = await getAllFitnessRegistrationsWithDetails();
+    if (!regs.length) return ctx.reply('Нет записей для экспорта.');
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Фитнес записи');
+    sheet.columns = [
+      { header: 'ФИО', key: 'fullName', width: 25 },
+      { header: 'Телефон', key: 'phone', width: 15 },
+      { header: 'Дата/время', key: 'date', width: 20 },
+      { header: 'Тип тренировки', key: 'type', width: 20 },
+      { header: 'Дата регистрации', key: 'createdAt', width: 20 },
+      { header: 'Фитнес центр', key: 'center', width: 25 },
+    ];
+    for (const reg of regs) {
+      sheet.addRow({
+        fullName: reg.user?.fullName || '',
+        phone: reg.user?.phone || '',
+        date: reg.slot ? new Date(reg.slot.date).toLocaleString('ru-RU') : '',
+        type: reg.slot?.type || '',
+        createdAt: new Date(reg.createdAt).toLocaleString('ru-RU'),
+        center: reg.slot?.center?.name || '',
+      });
+    }
+    const buffer = await workbook.xlsx.writeBuffer();
+    await ctx.replyWithDocument({ source: Buffer.from(buffer), filename: 'fitness_registrations.xlsx' });
   });
 
   bot.action('admin_questions', async (ctx) => {
