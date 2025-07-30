@@ -4,9 +4,19 @@ const { addQuestion, answerQuestion, getQuestionById, getUserQuestionsCountToday
 const { getUpcomingEvents } = require('../services/eventService');
 const prisma = require('../models');
 const { handleFitnessCommand, handleMyFitnessCommand } = require('./fitness');
+const { askGPT } = require('../services/openaiService');
+const faqService = require('../services/faqService');
 
 const userStates = {};
 const adminStates = {};
+
+const { mainMenu } = require('../menus');
+
+const consultationMenu = Markup.keyboard([
+  ['🏋️ Фитнес-центр', '📆 Мероприятия'],
+  ['🎁 Преференции', '📚 Консультация по договору'],
+  ['❔Вопрос администрации']
+]).resize();
 
 module.exports = (bot) => {
   bot.start((ctx) => {
@@ -18,12 +28,7 @@ module.exports = (bot) => {
       '• Программа преференций\n' +
       '• Консультация по договору\n' +
       '• Обратная связь',
-      Markup.inlineKeyboard([
-        [Markup.button.callback('Фитнес-центр', 'show_fitness')],
-        [Markup.button.callback('Мероприятия', 'show_events')],
-        [Markup.button.callback('Узнать о привилегиях', 'show_privileges')],
-        [Markup.button.callback('Задать вопрос', 'ask_question')]
-      ])
+      mainMenu
     );
   });
 
@@ -191,5 +196,134 @@ module.exports = (bot) => {
   bot.action('fitness_my', async (ctx) => {
     await ctx.answerCbQuery();
     await handleMyFitnessCommand(ctx);
+  });
+
+  bot.hears('🏋️ Фитнес-центр', async (ctx) => {
+    console.log('Нажата кнопка: Фитнес-центр');
+    await handleFitnessCommand(ctx);
+  });
+  bot.hears('📆 Мероприятия', async (ctx) => {
+    console.log('Нажата кнопка: Мероприятия');
+    await ctx.reply('Выберите действие:',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('Мои мероприятия', 'my_events')],
+        [Markup.button.callback('Предстоящие мероприятия', 'upcoming_events')]
+      ])
+    );
+  });
+  bot.hears('🎁 Преференции', async (ctx) => {
+    console.log('Нажата кнопка: Преференции');
+    const privileges = await getAllPrivileges();
+    if (!privileges.length) {
+      await ctx.reply('Список привилегий пока пуст.', mainMenu);
+      return;
+    }
+    let text = '*Профсоюзная программа преференций:*\n\n';
+    privileges.forEach((p, i) => {
+      text += `${i + 1}. *${p.title}*\n${p.details}`;
+      if (p.link) text += `\n[Подробнее](${p.link})`;
+      text += '\n\n';
+    });
+    await ctx.reply(text, { parse_mode: 'Markdown', ...mainMenu.reply_markup });
+  });
+  bot.hears('❔Вопрос администрации', async (ctx) => {
+    console.log('Нажата кнопка: Вопрос администрации');
+    await ctx.reply('Пожалуйста, напишите свой вопрос одним сообщением.', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'user_skip_question')]]));
+    userStates[ctx.from.id] = 'waiting_for_question';
+  });
+
+  bot.action('user_skip_question', async (ctx) => {
+    ctx.message = { text: '-' };
+    if (userStates[ctx.from.id] === 'waiting_for_question') {
+      const user = ctx.from;
+      const count = await getUserQuestionsCountToday(String(user.id));
+      if (count >= 10) {
+        ctx.reply('Вы уже задали 10 вопросов сегодня. Попробуйте снова завтра.');
+        userStates[ctx.from.id] = undefined;
+        return;
+      }
+      const question = await addQuestion({
+        userTgId: String(user.id),
+        userName: user.username || user.first_name || '',
+        text: null
+      });
+      // Пересылаем админам с кнопкой "Ответить"
+      const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',') : [];
+      const msg = `Вопрос #${question.id} от @${user.username || '-'} (id: ${user.id}):\n(без текста)`;
+      for (const adminId of adminIds) {
+        try {
+          await ctx.telegram.sendMessage(adminId, msg, Markup.inlineKeyboard([
+            [Markup.button.callback('Ответить', `answer_${question.id}`)]
+          ]));
+        } catch (e) {}
+      }
+      ctx.reply('Ваш вопрос отправлен администрации. Спасибо!');
+      userStates[ctx.from.id] = undefined;
+    }
+  });
+
+  bot.hears('📚 Консультация по договору', async (ctx) => {
+    const topics = await faqService.getAllTopics();
+    if (!topics.length) return ctx.reply('Темы консультаций пока не добавлены.');
+    const topicButtons = topics.map(topic => [Markup.button.callback(topic.title, `consult_topic_${topic.id}`)]);
+    topicButtons.push([Markup.button.callback('Задать свой вопрос', 'consult_ask_custom')]);
+    await ctx.reply('Выберите тему:', Markup.inlineKeyboard(topicButtons));
+  });
+
+  bot.action(/consult_topic_(\d+)/, async (ctx) => {
+    const topicId = Number(ctx.match[1]);
+    const faqs = await faqService.getFaqsByTopicId(topicId);
+    if (!faqs.length) return ctx.reply('В этой теме пока нет FAQ.');
+    await ctx.reply('Часто задаваемые вопросы:',
+      Markup.inlineKeyboard([
+        ...faqs.map((faq, i) => [Markup.button.callback(faq.question, `consult_faq_${faq.id}`)]),
+        [Markup.button.callback('Задать свой вопрос', 'consult_ask_custom')]
+      ])
+    );
+    ctx.answerCbQuery();
+  });
+
+  bot.action(/consult_faq_(\d+)/, async (ctx) => {
+    const faqId = Number(ctx.match[1]);
+    const faq = await require('../models').fAQ.findUnique({ where: { id: faqId } });
+    if (!faq) return ctx.reply('Вопрос не найден.');
+    await ctx.replyWithMarkdown(`*Вопрос:*
+${faq.question}
+
+*Ответ:*
+${faq.answer}`);
+    ctx.answerCbQuery();
+  });
+
+  bot.action('consult_ask_custom', async (ctx) => {
+    ctx.answerCbQuery();
+    await ctx.reply('Пожалуйста, напишите свой вопрос по коллективному договору или нормативным документам.');
+    userStates[ctx.from.id] = 'waiting_for_consult_question';
+  });
+
+  bot.on('text', async (ctx, next) => {
+    if (userStates[ctx.from.id] === 'waiting_for_consult_question') {
+      const userQuestion = ctx.message.text;
+      await ctx.reply('Ваш вопрос отправлен на обработку. Пожалуйста, подождите...');
+      try {
+        const answer = await askGPT(`Вопрос по коллективному договору: ${userQuestion}`);
+        await ctx.replyWithMarkdown(`*Ответ:*
+${answer}`);
+      } catch (e) {
+        await ctx.reply('Произошла ошибка при обращении к ИИ. Попробуйте позже.');
+      }
+      userStates[ctx.from.id] = undefined;
+    } else {
+      return next();
+    }
+  });
+
+  // Глобальный сброс ожидания любого текстового ввода при нажатии callback-кнопки
+  const waitingStates = ['waiting_for_question', 'waiting_for_consult_question'];
+  bot.on('callback_query', async (ctx, next) => {
+    if (waitingStates.includes(userStates[ctx.from.id])) {
+      userStates[ctx.from.id] = undefined;
+    }
+    return next();
   });
 };

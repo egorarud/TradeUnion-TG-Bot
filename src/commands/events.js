@@ -40,7 +40,7 @@ module.exports = (bot) => {
       });
     }
     userEventStates[ctx.from.id] = { eventId };
-    ctx.reply('Введите комментарий к записи (например, вопрос или пожелание). Если не нужно — отправьте "-".');
+    ctx.reply('Введите комментарий к записи (например, вопрос или пожелание).', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'user_skip')]]));
   });
 
   // Обработка комментария к записи
@@ -97,6 +97,23 @@ module.exports = (bot) => {
       ctx.reply('Ваша запись отменена.');
     } else {
       ctx.reply('Не удалось отменить запись (возможно, она уже отменена или не принадлежит вам).');
+    }
+  });
+
+  bot.action('user_skip', async (ctx) => {
+    ctx.message = { text: '-' };
+    if (userEventStates[ctx.from.id] && userEventStates[ctx.from.id].eventId) {
+      const { eventId } = userEventStates[ctx.from.id];
+      let user = await prisma.user.findUnique({ where: { telegramId: String(ctx.from.id) } });
+      if (!user) return ctx.reply('Ошибка пользователя.');
+      const comment = null;
+      const reg = await registerUserForEvent(eventId, user.id, comment);
+      if (!reg) {
+        ctx.reply('Вы уже зарегистрированы на это мероприятие.');
+      } else {
+        ctx.reply('Вы успешно записаны на мероприятие!');
+      }
+      userEventStates[ctx.from.id] = undefined;
     }
   });
 }; 

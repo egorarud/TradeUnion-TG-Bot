@@ -14,12 +14,253 @@ const {
   getSlotById,
   getAllFitnessRegistrationsWithDetails
 } = require('../services/fitnessService');
+const { getAllTopics, addTopic, addFaq } = require('../services/faqService');
 const ExcelJS = require('exceljs');
 
 const adminStates = {};
 
 function isAdmin(ctx) {
   return ADMIN_IDS.includes(ctx.from.id);
+}
+
+// --- Вынесенная функция для обработки шагов админки ---
+async function handleAdminStep(ctx, text) {
+  const state = adminStates[ctx.from.id];
+  if (!state) return false;
+  // --- Центры ---
+  if (state.center) {
+    if (state.step === 'add_fitness_center_name') {
+      state.center.name = text;
+      state.step = 'add_fitness_center_address';
+      await ctx.reply('Введите адрес центра (или "-" если не требуется):');
+      return true;
+    }
+    if (state.step === 'add_fitness_center_address') {
+      state.center.address = text === '-' ? null : text;
+      await createFitnessCenter(state.center);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Центр добавлен!');
+      return true;
+    }
+    if (state.step === 'edit_fitness_center_name') {
+      if (text !== '-') state.center.name = text;
+      state.step = 'edit_fitness_center_address';
+      await ctx.reply('Введите новый адрес:', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
+      return true;
+    }
+    if (state.step === 'edit_fitness_center_address') {
+      if (text !== '-') state.center.address = text;
+      await updateFitnessCenter(state.centerId, state.center);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Центр обновлён!');
+      return true;
+    }
+  }
+  // --- Слоты ---
+  if (state.slot) {
+    if (state.step === 'add_fitness_slot_date') {
+      const date = new Date(text);
+      if (isNaN(date)) {
+        await ctx.reply('Некорректная дата. Введите в формате: 2024-08-01 18:00');
+        return true;
+      }
+      state.slot.date = date;
+      state.step = 'add_fitness_slot_capacity';
+      await ctx.reply('Введите вместимость (число):');
+      return true;
+    }
+    if (state.step === 'add_fitness_slot_capacity') {
+      state.slot.capacity = Number(text);
+      state.slot.type = 'Индивидуальная';
+      await createFitnessSlot(state.slot);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Слот добавлен!');
+      return true;
+    }
+    if (state.step === 'edit_fitness_slot_date') {
+      if (text !== '-') {
+        const date = new Date(text);
+        if (isNaN(date)) {
+          await ctx.reply('Некорректная дата. Введите в формате: 2024-08-01 18:00');
+          return true;
+        }
+        state.slot.date = date;
+      }
+      state.step = 'edit_fitness_slot_capacity';
+      await ctx.reply('Введите новую вместимость:', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
+      return true;
+    }
+    if (state.step === 'edit_fitness_slot_capacity') {
+      if (text !== '-') state.slot.capacity = Number(text);
+      state.slot.type = 'Индивидуальная';
+      await updateFitnessSlot(state.slotId, state.slot);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Слот обновлён!');
+      return true;
+    }
+  }
+  // --- Мероприятия ---
+  if (state.event) {
+    if (state.step === 'add_title') {
+      state.event.title = text;
+      state.step = 'add_description';
+      await ctx.reply('Введите описание мероприятия:');
+      return true;
+    }
+    if (state.step === 'add_description') {
+      state.event.description = text;
+      state.step = 'add_date';
+      await ctx.reply('Введите дату и время (например: 2024-08-01 18:00):');
+      return true;
+    }
+    if (state.step === 'add_date') {
+      const date = new Date(text);
+      if (isNaN(date)) {
+        await ctx.reply('Некорректная дата. Введите в формате: 2024-08-01 18:00');
+        return true;
+      }
+      state.event.date = date;
+      state.step = 'add_capacity';
+      await ctx.reply('Введите вместимость (число, можно пропустить через "-")');
+      return true;
+    }
+    if (state.step === 'add_capacity') {
+      const cap = text;
+      state.event.capacity = cap === '-' ? null : Number(cap);
+      await createEvent(state.event);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Мероприятие добавлено!');
+      return true;
+    }
+    if (state.step === 'edit_title') {
+      if (text !== '-') state.event.title = text;
+      state.step = 'edit_description';
+      await ctx.reply('Введите новое описание:', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
+      return true;
+    }
+    if (state.step === 'edit_description') {
+      if (text !== '-') state.event.description = text;
+      state.step = 'edit_date';
+      await ctx.reply('Введите новую дату и время:', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
+      return true;
+    }
+    if (state.step === 'edit_date') {
+      if (text !== '-') {
+        const date = new Date(text);
+        if (isNaN(date)) {
+          await ctx.reply('Некорректная дата. Введите в формате: 2024-08-01 18:00');
+          return true;
+        }
+        state.event.date = date;
+      }
+      state.step = 'edit_capacity';
+      await ctx.reply('Введите новую вместимость:', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
+      return true;
+    }
+    if (state.step === 'edit_capacity') {
+      if (text !== '-') state.event.capacity = Number(text);
+      await updateEvent(state.eventId, state.event);
+      // Уведомление пользователей
+      const regs = await getEventRegistrationsWithUsers(state.eventId);
+      for (const reg of regs) {
+        if (reg.user && reg.user.telegramId) {
+          try {
+            await ctx.telegram.sendMessage(
+              reg.user.telegramId,
+              `Внимание! Мероприятие "${state.event.title}" было обновлено администратором. Проверьте детали мероприятия.`
+            );
+          } catch (e) { /* ignore errors for users who blocked bot */ }
+        }
+      }
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Мероприятие обновлено!');
+      return true;
+    }
+  }
+  // --- Привилегии ---
+  if (state.priv) {
+    if (state.step === 'add_priv_title') {
+      state.priv.title = text;
+      state.step = 'add_priv_details';
+      await ctx.reply('Введите детали (описание) привилегии:');
+      return true;
+    }
+    if (state.step === 'add_priv_details') {
+      state.priv.details = text;
+      state.step = 'add_priv_link';
+      await ctx.reply('Введите ссылку (или "-" если не требуется):');
+      return true;
+    }
+    if (state.step === 'add_priv_link') {
+      state.priv.link = text === '-' ? null : text;
+      await createPrivilege(state.priv);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Привилегия добавлена!');
+      return true;
+    }
+    if (state.step === 'edit_priv_title') {
+      if (text !== '-') state.priv.title = text;
+      state.step = 'edit_priv_details';
+      await ctx.reply('Введите новые детали:', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
+      return true;
+    }
+    if (state.step === 'edit_priv_details') {
+      if (text !== '-') state.priv.details = text;
+      state.step = 'edit_priv_link';
+      await ctx.reply('Введите новую ссылку:', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
+      return true;
+    }
+    if (state.step === 'edit_priv_link') {
+      if (text !== '-') state.priv.link = text;
+      await updatePrivilege(state.privId, state.priv);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Привилегия обновлена!');
+      return true;
+    }
+  }
+  // --- FAQ: добавление темы ---
+  if (state.faqTopic) {
+    if (state.step === 'add_faq_topic_title') {
+      const title = text.trim();
+      if (!title) {
+        await ctx.reply('Название темы не может быть пустым. Введите ещё раз:');
+        return true;
+      }
+      await addTopic(title);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('Тема добавлена!');
+      return true;
+    }
+  }
+  // --- FAQ: добавление вопроса ---
+  if (state.faqAdd) {
+    if (state.step === 'add_faq_select_topic') {
+      // text = id темы
+      const topicId = Number(text);
+      if (isNaN(topicId)) {
+        await ctx.reply('Некорректный выбор. Введите номер темы:');
+        return true;
+      }
+      state.faqAdd.topicId = topicId;
+      state.step = 'add_faq_question';
+      await ctx.reply('Введите текст вопроса:');
+      return true;
+    }
+    if (state.step === 'add_faq_question') {
+      state.faqAdd.question = text;
+      state.step = 'add_faq_answer';
+      await ctx.reply('Введите ответ на вопрос:');
+      return true;
+    }
+    if (state.step === 'add_faq_answer') {
+      state.faqAdd.answer = text;
+      await addFaq(state.faqAdd.topicId, state.faqAdd.question, state.faqAdd.answer);
+      adminStates[ctx.from.id] = undefined;
+      await ctx.reply('FAQ добавлен!');
+      return true;
+    }
+  }
+  return false;
 }
 
 module.exports = (bot) => {
@@ -44,7 +285,6 @@ module.exports = (bot) => {
         [Markup.button.callback('➕ Добавить центр', 'admin_fitness_add_center')],
         [Markup.button.callback('✏️ Редактировать центр', 'admin_fitness_edit_center')],
         [Markup.button.callback('🗑️ Удалить центр', 'admin_fitness_delete_center')],
-        [Markup.button.callback('⬅️ Назад', 'admin_back')],
       ])
     );
   });
@@ -77,10 +317,10 @@ module.exports = (bot) => {
     if (!center) return ctx.editMessageText('Центр не найден.');
     adminStates[ctx.from.id] = { step: 'edit_fitness_center_name', centerId, center };
     await ctx.editMessageText(
-      `Редактирование центра "${center.name}".\nВыберите действие или введите новое название (или "-" чтобы оставить прежнее):`,
+      `Редактирование центра "${center.name}".\nВыберите действие или введите новое название:`,
       Markup.inlineKeyboard([
-        [Markup.button.callback('Слоты центра', `admin_fitness_slots_${centerId}`)],
-        [Markup.button.callback('⬅️ Назад', 'admin_fitness')]
+        [Markup.button.callback('Пропустить', 'admin_skip')],
+        [Markup.button.callback('Слоты центра', `admin_fitness_slots_${centerId}`)]
       ])
     );
   });
@@ -116,8 +356,7 @@ module.exports = (bot) => {
           `${s.type} — ${new Date(s.date).toLocaleString('ru-RU')}`,
           `admin_fitness_edit_slot_${s.id}`
         )]),
-        [Markup.button.callback('➕ Добавить слот', `admin_fitness_add_slot_${centerId}`)],
-        [Markup.button.callback('⬅️ Назад', `admin_fitness_edit_center_${centerId}`)]
+        [Markup.button.callback('➕ Добавить слот', `admin_fitness_add_slot_${centerId}`)]
       ])
     );
   });
@@ -126,8 +365,8 @@ module.exports = (bot) => {
   bot.action(/admin_fitness_add_slot_(\d+)/, async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
     const centerId = Number(ctx.match[1]);
-    adminStates[ctx.from.id] = { step: 'add_fitness_slot_type', slot: { centerId } };
-    await ctx.editMessageText('Введите тип тренировки:');
+    adminStates[ctx.from.id] = { step: 'add_fitness_slot_date', slot: { centerId, type: 'Индивидуальная' } };
+    await ctx.editMessageText('Введите дату и время (например: 2024-08-01 18:00):');
   });
 
   // Редактирование слота (выбор)
@@ -136,8 +375,8 @@ module.exports = (bot) => {
     const slotId = Number(ctx.match[1]);
     const slot = await getSlotById(slotId);
     if (!slot) return ctx.editMessageText('Слот не найден.');
-    adminStates[ctx.from.id] = { step: 'edit_fitness_slot_type', slotId, slot };
-    await ctx.editMessageText(`Редактирование слота.\nВведите новый тип тренировки (или "-" чтобы оставить прежний):`);
+    adminStates[ctx.from.id] = { step: 'edit_fitness_slot_date', slotId, slot: { ...slot, type: 'Индивидуальная' } };
+    await ctx.editMessageText('Редактирование слота.\nВведите новую дату и время:', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
   });
 
   // Удаление слота (выбор)
@@ -151,71 +390,8 @@ module.exports = (bot) => {
   // --- Обработка текстовых шагов для фитнес-центров и слотов ---
   bot.on('text', async (ctx, next) => {
     if (!isAdmin(ctx)) return next();
-    const state = adminStates[ctx.from.id];
-    if (!state) return next();
-    // --- Центры ---
-    if (state.step === 'add_fitness_center_name') {
-      state.center.name = ctx.message.text;
-      state.step = 'add_fitness_center_address';
-      return ctx.reply('Введите адрес центра (или "-" если не требуется):');
-    }
-    if (state.step === 'add_fitness_center_address') {
-      state.center.address = ctx.message.text === '-' ? null : ctx.message.text;
-      await createFitnessCenter(state.center);
-      adminStates[ctx.from.id] = undefined;
-      return ctx.reply('Центр добавлен!');
-    }
-    if (state.step === 'edit_fitness_center_name') {
-      if (ctx.message.text !== '-') state.center.name = ctx.message.text;
-      state.step = 'edit_fitness_center_address';
-      return ctx.reply('Введите новый адрес (или "-" чтобы оставить прежний):');
-    }
-    if (state.step === 'edit_fitness_center_address') {
-      if (ctx.message.text !== '-') state.center.address = ctx.message.text;
-      await updateFitnessCenter(state.centerId, state.center);
-      adminStates[ctx.from.id] = undefined;
-      return ctx.reply('Центр обновлён!');
-    }
-    // --- Слоты ---
-    if (state.step === 'add_fitness_slot_type') {
-      state.slot.type = ctx.message.text;
-      state.step = 'add_fitness_slot_date';
-      return ctx.reply('Введите дату и время (например: 2024-08-01 18:00):');
-    }
-    if (state.step === 'add_fitness_slot_date') {
-      const date = new Date(ctx.message.text);
-      if (isNaN(date)) return ctx.reply('Некорректная дата. Введите в формате: 2024-08-01 18:00');
-      state.slot.date = date;
-      state.step = 'add_fitness_slot_capacity';
-      return ctx.reply('Введите вместимость (число):');
-    }
-    if (state.step === 'add_fitness_slot_capacity') {
-      state.slot.capacity = Number(ctx.message.text);
-      await createFitnessSlot(state.slot);
-      adminStates[ctx.from.id] = undefined;
-      return ctx.reply('Слот добавлен!');
-    }
-    if (state.step === 'edit_fitness_slot_type') {
-      if (ctx.message.text !== '-') state.slot.type = ctx.message.text;
-      state.step = 'edit_fitness_slot_date';
-      return ctx.reply('Введите новую дату и время (или "-" чтобы оставить прежнюю):');
-    }
-    if (state.step === 'edit_fitness_slot_date') {
-      if (ctx.message.text !== '-') {
-        const date = new Date(ctx.message.text);
-        if (isNaN(date)) return ctx.reply('Некорректная дата. Введите в формате: 2024-08-01 18:00');
-        state.slot.date = date;
-      }
-      state.step = 'edit_fitness_slot_capacity';
-      return ctx.reply('Введите новую вместимость (или "-" чтобы оставить прежнюю):');
-    }
-    if (state.step === 'edit_fitness_slot_capacity') {
-      if (ctx.message.text !== '-') state.slot.capacity = Number(ctx.message.text);
-      await updateFitnessSlot(state.slotId, state.slot);
-      adminStates[ctx.from.id] = undefined;
-      return ctx.reply('Слот обновлён!');
-    }
-    return next();
+    const handled = await handleAdminStep(ctx, ctx.message.text);
+    if (!handled) return next();
   });
 
   bot.action('admin_events', async (ctx) => {
@@ -224,7 +400,6 @@ module.exports = (bot) => {
       Markup.inlineKeyboard([
         [Markup.button.callback('➕ Добавить', 'admin_event_add')],
         [Markup.button.callback('✏️ Редактировать', 'admin_event_edit')],
-        [Markup.button.callback('⬅️ Назад', 'admin_back')],
       ])
     );
   });
@@ -255,78 +430,7 @@ module.exports = (bot) => {
     const event = await getEventById(eventId);
     if (!event) return ctx.editMessageText('Мероприятие не найдено.');
     adminStates[ctx.from.id] = { step: 'edit_title', eventId, event };
-    await ctx.editMessageText(`Редактирование мероприятия "${event.title}".\nВведите новое название (или "-" чтобы оставить прежнее):`);
-  });
-
-  // Обработка текстовых шагов для добавления/редактирования
-  bot.on('text', async (ctx, next) => {
-    if (!isAdmin(ctx)) return next();
-    const state = adminStates[ctx.from.id];
-    if (!state) return next();
-    // Добавление мероприятия
-    if (state.step === 'add_title') {
-      state.event.title = ctx.message.text;
-      state.step = 'add_description';
-      return ctx.reply('Введите описание мероприятия:');
-    }
-    if (state.step === 'add_description') {
-      state.event.description = ctx.message.text;
-      state.step = 'add_date';
-      return ctx.reply('Введите дату и время (например: 2024-08-01 18:00):');
-    }
-    if (state.step === 'add_date') {
-      const date = new Date(ctx.message.text);
-      if (isNaN(date)) return ctx.reply('Некорректная дата. Введите в формате: 2024-08-01 18:00');
-      state.event.date = date;
-      state.step = 'add_capacity';
-      return ctx.reply('Введите вместимость (число, можно пропустить через "-"):');
-    }
-    if (state.step === 'add_capacity') {
-      const cap = ctx.message.text;
-      state.event.capacity = cap === '-' ? null : Number(cap);
-      await createEvent(state.event);
-      adminStates[ctx.from.id] = undefined;
-      return ctx.reply('Мероприятие добавлено!');
-    }
-    // Редактирование мероприятия
-    if (state.step === 'edit_title') {
-      if (ctx.message.text !== '-') state.event.title = ctx.message.text;
-      state.step = 'edit_description';
-      return ctx.reply('Введите новое описание (или "-" чтобы оставить прежнее):');
-    }
-    if (state.step === 'edit_description') {
-      if (ctx.message.text !== '-') state.event.description = ctx.message.text;
-      state.step = 'edit_date';
-      return ctx.reply('Введите новую дату и время (или "-" чтобы оставить прежнее):');
-    }
-    if (state.step === 'edit_date') {
-      if (ctx.message.text !== '-') {
-        const date = new Date(ctx.message.text);
-        if (isNaN(date)) return ctx.reply('Некорректная дата. Введите в формате: 2024-08-01 18:00');
-        state.event.date = date;
-      }
-      state.step = 'edit_capacity';
-      return ctx.reply('Введите новую вместимость (или "-" чтобы оставить прежнее):');
-    }
-    if (state.step === 'edit_capacity') {
-      if (ctx.message.text !== '-') state.event.capacity = Number(ctx.message.text);
-      await updateEvent(state.eventId, state.event);
-      // Уведомление пользователей
-      const regs = await getEventRegistrationsWithUsers(state.eventId);
-      for (const reg of regs) {
-        if (reg.user && reg.user.telegramId) {
-          try {
-            await ctx.telegram.sendMessage(
-              reg.user.telegramId,
-              `Внимание! Мероприятие "${state.event.title}" было обновлено администратором. Проверьте детали мероприятия.`
-            );
-          } catch (e) { /* ignore errors for users who blocked bot */ }
-        }
-      }
-      adminStates[ctx.from.id] = undefined;
-      return ctx.reply('Мероприятие обновлено!');
-    }
-    return next();
+    await ctx.editMessageText(`Редактирование мероприятия "${event.title}".\nВведите новое название:`, Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
   });
 
   bot.action('admin_privileges', async (ctx) => {
@@ -335,7 +439,6 @@ module.exports = (bot) => {
       Markup.inlineKeyboard([
         [Markup.button.callback('➕ Добавить', 'admin_priv_add')],
         [Markup.button.callback('✏️ Редактировать', 'admin_priv_edit')],
-        [Markup.button.callback('⬅️ Назад', 'admin_back')],
       ])
     );
   });
@@ -367,55 +470,64 @@ module.exports = (bot) => {
     const priv = privs.find(p => p.id === privId);
     if (!priv) return ctx.editMessageText('Привилегия не найдена.');
     adminStates[ctx.from.id] = { step: 'edit_priv_title', privId, priv };
-    await ctx.editMessageText(`Редактирование привилегии "${priv.title}".\nВведите новое название (или "-" чтобы оставить прежнее):`);
-  });
-
-  // Обработка текстовых шагов для добавления/редактирования привилегий
-  bot.on('text', async (ctx, next) => {
-    if (!isAdmin(ctx)) return next();
-    const state = adminStates[ctx.from.id];
-    if (!state) return next();
-    // Добавление привилегии
-    if (state.step === 'add_priv_title') {
-      state.priv.title = ctx.message.text;
-      state.step = 'add_priv_details';
-      return ctx.reply('Введите детали (описание) привилегии:');
-    }
-    if (state.step === 'add_priv_details') {
-      state.priv.details = ctx.message.text;
-      state.step = 'add_priv_link';
-      return ctx.reply('Введите ссылку (или "-" если не требуется):');
-    }
-    if (state.step === 'add_priv_link') {
-      state.priv.link = ctx.message.text === '-' ? null : ctx.message.text;
-      await createPrivilege(state.priv);
-      adminStates[ctx.from.id] = undefined;
-      return ctx.reply('Привилегия добавлена!');
-    }
-    // Редактирование привилегии
-    if (state.step === 'edit_priv_title') {
-      if (ctx.message.text !== '-') state.priv.title = ctx.message.text;
-      state.step = 'edit_priv_details';
-      return ctx.reply('Введите новые детали (или "-" чтобы оставить прежние):');
-    }
-    if (state.step === 'edit_priv_details') {
-      if (ctx.message.text !== '-') state.priv.details = ctx.message.text;
-      state.step = 'edit_priv_link';
-      return ctx.reply('Введите новую ссылку (или "-" чтобы оставить прежнюю/очистить):');
-    }
-    if (state.step === 'edit_priv_link') {
-      if (ctx.message.text !== '-') state.priv.link = ctx.message.text;
-      await updatePrivilege(state.privId, state.priv);
-      adminStates[ctx.from.id] = undefined;
-      return ctx.reply('Привилегия обновлена!');
-    }
-    return next();
+    await ctx.editMessageText(`Редактирование привилегии "${priv.title}".\nВведите новое название:`, Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'admin_skip')]]));
   });
 
   bot.action('admin_faq', async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
-    await ctx.editMessageText('Управление FAQ и нормативными документами');
-    // Здесь будет подменю и логика управления FAQ/документами
+    await ctx.editMessageText('Управление FAQ и нормативными документами',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('➕ Добавить тему', 'admin_faq_add_topic')],
+        [Markup.button.callback('➕ Добавить FAQ', 'admin_faq_add_faq')],
+        // В будущем: [Markup.button.callback('✏️ Редактировать', 'admin_faq_edit')],
+        [Markup.button.callback('⬅️ Назад', 'admin_back')]
+      ])
+    );
+  });
+
+  // Добавление темы FAQ
+  bot.action('admin_faq_add_topic', async (ctx) => {
+    if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
+    adminStates[ctx.from.id] = { step: 'add_faq_topic_title', faqTopic: {} };
+    await ctx.editMessageText('Введите название новой темы FAQ:');
+  });
+
+  // Добавление FAQ (вопроса)
+  bot.action('admin_faq_add_faq', async (ctx) => {
+    if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
+    const topics = await getAllTopics();
+    if (!topics.length) {
+      return ctx.editMessageText('Сначала добавьте хотя бы одну тему FAQ!');
+    }
+    let msg = 'Выберите тему для FAQ (введите номер):\n';
+    topics.forEach((t, i) => {
+      msg += `${i + 1}. ${t.title}\n`;
+    });
+    adminStates[ctx.from.id] = { step: 'add_faq_select_topic', faqAdd: {} };
+    // Сохраняем соответствие номера и id темы
+    adminStates[ctx.from.id].faqAdd.topicMap = topics.map(t => t.id);
+    await ctx.editMessageText(msg);
+  });
+
+  // Обработка выбора темы для FAQ по номеру
+  bot.on('text', async (ctx, next) => {
+    const state = adminStates[ctx.from.id];
+    if (state && state.step === 'add_faq_select_topic' && state.faqAdd) {
+      // Ожидаем номер темы
+      const num = Number(ctx.message.text);
+      const topicId = state.faqAdd.topicMap && state.faqAdd.topicMap[num - 1];
+      if (!topicId) {
+        await ctx.reply('Некорректный номер. Введите номер из списка:');
+        return;
+      }
+      state.faqAdd.topicId = topicId;
+      state.step = 'add_faq_question';
+      await ctx.reply('Введите текст вопроса:');
+      return;
+    }
+    // handleAdminStep для остальных шагов
+    if (await handleAdminStep(ctx, ctx.message.text)) return;
+    return next();
   });
 
   bot.action('admin_export', async (ctx) => {
@@ -453,4 +565,12 @@ module.exports = (bot) => {
     await ctx.editMessageText('Входящие вопросы пользователей (ответить/архивировать)');
     // Здесь будет логика просмотра и ответа на вопросы
   });
-}; 
+
+  bot.action('admin_skip', async (ctx) => {
+    if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
+    const state = adminStates[ctx.from.id];
+    if (!state) return ctx.answerCbQuery('Нет активного действия для пропуска');
+    await handleAdminStep(ctx, '-');
+    await ctx.answerCbQuery('Пропущено');
+  });
+};

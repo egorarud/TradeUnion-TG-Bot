@@ -4,10 +4,12 @@ const logger = require('./utils/logger');
 const prisma = require('./models');
 const adminPanel = require('./admin');
 const fitnessCommands = require('./commands/fitness');
+const { mainMenu } = require('./menus');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 // Обработка любого первого сообщения пользователя
+// В приветствии и при регистрации используем только mainMenu
 bot.on('message', async (ctx, next) => {
   // Не реагируем на команды (их обрабатывают другие модули)
   if (ctx.message.text && ctx.message.text.startsWith('/')) return next();
@@ -22,10 +24,8 @@ bot.on('message', async (ctx, next) => {
       }
     });
     await ctx.reply(
-      'Добро пожаловать! Для начала работы нажмите кнопку ниже:',
-      Markup.inlineKeyboard([
-        [Markup.button.callback('Старт', 'first_start')]
-      ])
+      'Добро пожаловать! Для начала работы выберите действие в меню ниже:',
+      mainMenu
     );
     return;
   }
@@ -43,10 +43,7 @@ bot.action('first_start', (ctx) => {
     '• Программа преференций\n' +
     '• Консультация по договору\n' +
     '• Обратная связь',
-    Markup.inlineKeyboard([
-      [Markup.button.callback('Узнать о привилегиях', 'show_privileges')],
-      [Markup.button.callback('Задать вопрос', 'ask_question')]
-    ])
+    mainMenu
   );
 });
 

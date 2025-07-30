@@ -84,3 +84,19 @@ model FitnessRegistration {
   userId    Int
   createdAt DateTime @default(now())
 }
+
+// Темы для FAQ по коллективному договору
+model FAQTopic {
+  id    Int    @id @default(autoincrement())
+  title String @unique
+  faqs  FAQ[]
+}
+
+// Вопрос-ответ для FAQ
+model FAQ {
+  id       Int      @id @default(autoincrement())
+  question String
+  answer   String
+  topic    FAQTopic @relation(fields: [topicId], references: [id])
+  topicId  Int
+}

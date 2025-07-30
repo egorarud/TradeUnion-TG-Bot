@@ -50,8 +50,10 @@ module.exports = (bot) => {
   // Выбор центра
   bot.action(/fitness_center_(\d+)/, async (ctx) => {
     const centerId = Number(ctx.match[1]);
-    const slots = await getSlotsByCenter(centerId);
-    if (!slots.length) return ctx.editMessageText('Нет доступных слотов в этом центре.');
+    let slots = await getSlotsByCenter(centerId);
+    // Показываем только индивидуальные тренировки
+    slots = slots.filter(s => s.type === 'Индивидуальная');
+    if (!slots.length) return ctx.editMessageText('Нет доступных индивидуальных слотов в этом центре.');
     await ctx.editMessageText('Выберите дату и тип тренировки:',
       Markup.inlineKeyboard(
         slots.map(s => [Markup.button.callback(
@@ -90,6 +92,19 @@ module.exports = (bot) => {
         }
       });
     }
+    // Если не хватает ФИО или телефона, запрашиваем их
+    if (!user.fullName || user.fullName.trim() === '' || !user.phone || user.phone.trim() === '') {
+      userFitnessStates[ctx.from.id] = {
+        slotId,
+        step: !user.fullName || user.fullName.trim() === '' ? 'ask_fullName' : 'ask_phone',
+        tempUser: user
+      };
+      if (!user.fullName || user.fullName.trim() === '') {
+        return ctx.reply('Пожалуйста, введите ваше ФИО:');
+      } else {
+        return ctx.reply('Пожалуйста, введите ваш номер телефона:');
+      }
+    }
     const reg = await registerUserForFitness(slotId, user.id);
     if (reg === null) {
       return ctx.editMessageText('Вы уже записаны в этом месяце на тренировку.');
@@ -98,6 +113,48 @@ module.exports = (bot) => {
     } else {
       return ctx.editMessageText('Вы успешно записаны на тренировку!');
     }
+  });
+
+  // Обработка ввода ФИО и телефона при регистрации
+  bot.on('text', async (ctx, next) => {
+    const state = userFitnessStates[ctx.from.id];
+    if (!state || (!state.step)) return next();
+    let user = state.tempUser || await prisma.user.findUnique({ where: { telegramId: String(ctx.from.id) } });
+    if (state.step === 'ask_fullName') {
+      const fullName = ctx.message.text.trim();
+      if (!fullName) return ctx.reply('Пожалуйста, введите корректное ФИО:');
+      await prisma.user.update({ where: { id: user.id }, data: { fullName } });
+      state.step = 'ask_phone';
+      state.tempUser.fullName = fullName;
+      return ctx.reply('Пожалуйста, введите ваш номер телефона:');
+    }
+    if (state.step === 'ask_phone') {
+      let phone = ctx.message.text.trim();
+      // Очистка номера: убираем пробелы, дефисы, скобки
+      phone = phone.replace(/[\s\-()]/g, '');
+      // Проверка: должен начинаться с +7, 7, 8 или + (международный)
+      let valid = false;
+      if (/^(\+7|7|8)\d{10}$/.test(phone)) {
+        valid = true;
+      } else if (/^\+\d{10,15}$/.test(phone)) {
+        valid = true;
+      }
+      if (!valid) {
+        return ctx.reply('Пожалуйста, введите корректный номер телефона. Пример: +79991234567 или 89991234567.');
+      }
+      await prisma.user.update({ where: { id: user.id }, data: { phone } });
+      // После получения всех данных — регистрируем на слот
+      const reg = await registerUserForFitness(state.slotId, user.id);
+      userFitnessStates[ctx.from.id] = undefined;
+      if (reg === null) {
+        return ctx.reply('Вы уже записаны в этом месяце на тренировку.');
+      } else if (reg === false) {
+        return ctx.reply('Слот уже заполнен.');
+      } else {
+        return ctx.reply('Вы успешно записаны на тренировку!');
+      }
+    }
+    return next();
   });
 
   // Отмена выбора
