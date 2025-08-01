@@ -1,6 +1,6 @@
 const { Markup } = require('telegraf');
 const { getAllPrivileges } = require('../services/privilegeService');
-const { addQuestion, answerQuestion, getQuestionById, getUserQuestionsCountToday } = require('../services/questionService');
+const { addQuestion, answerQuestion, getQuestionById, getUserQuestionsCountToday, deleteOldAnsweredQuestions } = require('../services/questionService');
 const { getUpcomingEvents } = require('../services/eventService');
 const prisma = require('../models');
 const { handleFitnessCommand, handleMyFitnessCommand } = require('./fitness');
@@ -18,8 +18,18 @@ const consultationMenu = Markup.keyboard([
   ['❔Вопрос администрации']
 ]).resize();
 
+const cancelInlineKeyboard = Markup.inlineKeyboard([
+  [Markup.button.callback('❌ Отмена', 'cancel_question')]
+]);
+
+const cancelMenu = Markup.keyboard([
+  ['❌ Отмена']
+]).oneTime().resize();
+
 module.exports = (bot) => {
-  bot.start((ctx) => {
+  bot.start(async (ctx) => {
+    // Удаляем старые вопросы (старше месяца после ответа)
+    await deleteOldAnsweredQuestions();
     ctx.reply(
       'Добро пожаловать в чат-бот профсоюзной поддержки!\n\n' +
       'Доступные функции:\n' +
@@ -110,10 +120,14 @@ module.exports = (bot) => {
   bot.on('text', async (ctx, next) => {
     // Пользователь задаёт вопрос
     if (userStates[ctx.from.id] === 'waiting_for_question') {
+      if (ctx.message.text === '❌ Отмена') {
+        // Обработка отмены вынесена в отдельный hears, но на всякий случай дублируем защиту
+        return;
+      }
       const user = ctx.from;
       const count = await getUserQuestionsCountToday(String(user.id));
       if (count >= 10) {
-        ctx.reply('Вы уже задали 10 вопросов сегодня. Попробуйте снова завтра.');
+        await ctx.reply('Вы уже задали 10 вопросов сегодня. Попробуйте снова завтра.', mainMenu);
         userStates[ctx.from.id] = undefined;
         return;
       }
@@ -132,7 +146,7 @@ module.exports = (bot) => {
           ]));
         } catch (e) {}
       }
-      ctx.reply('Ваш вопрос отправлен администрации. Спасибо!');
+      await ctx.reply('Ваш вопрос отправлен администрации. Спасибо!', mainMenu);
       userStates[ctx.from.id] = undefined;
     } else if (adminStates[ctx.from.id] && adminStates[ctx.from.id].questionId) {
       // Админ отвечает на вопрос
@@ -199,11 +213,9 @@ module.exports = (bot) => {
   });
 
   bot.hears('🏋️ Фитнес-центр', async (ctx) => {
-    console.log('Нажата кнопка: Фитнес-центр');
     await handleFitnessCommand(ctx);
   });
   bot.hears('📆 Мероприятия', async (ctx) => {
-    console.log('Нажата кнопка: Мероприятия');
     await ctx.reply('Выберите действие:',
       Markup.inlineKeyboard([
         [Markup.button.callback('Мои мероприятия', 'my_events')],
@@ -212,7 +224,6 @@ module.exports = (bot) => {
     );
   });
   bot.hears('🎁 Преференции', async (ctx) => {
-    console.log('Нажата кнопка: Преференции');
     const privileges = await getAllPrivileges();
     if (!privileges.length) {
       await ctx.reply('Список привилегий пока пуст.', mainMenu);
@@ -227,39 +238,22 @@ module.exports = (bot) => {
     await ctx.reply(text, { parse_mode: 'Markdown', ...mainMenu.reply_markup });
   });
   bot.hears('❔Вопрос администрации', async (ctx) => {
-    console.log('Нажата кнопка: Вопрос администрации');
-    await ctx.reply('Пожалуйста, напишите свой вопрос одним сообщением.', Markup.inlineKeyboard([[Markup.button.callback('Пропустить', 'user_skip_question')]]));
+    await ctx.reply('Пожалуйста, напишите свой вопрос одним сообщением.', {
+      reply_markup: { remove_keyboard: true }
+    });
+    await ctx.reply('Если передумали, нажмите "Отмена".', cancelInlineKeyboard);
     userStates[ctx.from.id] = 'waiting_for_question';
   });
 
-  bot.action('user_skip_question', async (ctx) => {
-    ctx.message = { text: '-' };
+  bot.action('cancel_question', async (ctx) => {
     if (userStates[ctx.from.id] === 'waiting_for_question') {
-      const user = ctx.from;
-      const count = await getUserQuestionsCountToday(String(user.id));
-      if (count >= 10) {
-        ctx.reply('Вы уже задали 10 вопросов сегодня. Попробуйте снова завтра.');
-        userStates[ctx.from.id] = undefined;
-        return;
-      }
-      const question = await addQuestion({
-        userTgId: String(user.id),
-        userName: user.username || user.first_name || '',
-        text: null
-      });
-      // Пересылаем админам с кнопкой "Ответить"
-      const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',') : [];
-      const msg = `Вопрос #${question.id} от @${user.username || '-'} (id: ${user.id}):\n(без текста)`;
-      for (const adminId of adminIds) {
-        try {
-          await ctx.telegram.sendMessage(adminId, msg, Markup.inlineKeyboard([
-            [Markup.button.callback('Ответить', `answer_${question.id}`)]
-          ]));
-        } catch (e) {}
-      }
-      ctx.reply('Ваш вопрос отправлен администрации. Спасибо!');
       userStates[ctx.from.id] = undefined;
+      try {
+        await ctx.editMessageReplyMarkup(); // убрать инлайн-кнопки
+      } catch (e) {}
+      await ctx.reply('Ввод вопроса отменён.', mainMenu);
     }
+    ctx.answerCbQuery();
   });
 
   bot.hears('📚 Консультация по договору', async (ctx) => {

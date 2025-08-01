@@ -9,7 +9,8 @@ async function getAllFitnessCenters() {
 async function getSlotsByCenter(centerId) {
   return prisma.fitnessSlot.findMany({
     where: { centerId, date: { gte: new Date() } },
-    orderBy: { date: 'asc' }
+    orderBy: { date: 'asc' },
+    include: { registrations: true }
   });
 }
 
@@ -40,16 +41,22 @@ async function userHasRegistrationThisMonth(userId) {
 }
 
 async function registerUserForFitness(slotId, userId) {
-  // Проверка лимита 1 запись в месяц
-  const already = await userHasRegistrationThisMonth(userId);
-  if (already) return null;
-  // Проверка слота на заполненность
+  // Проверка: уже есть запись на этот слот
+  const existing = await prisma.fitnessRegistration.findFirst({
+    where: { userId, slotId }
+  });
+  if (existing) return null;
+
+  // Получаем id центра, в который уже записан пользователь в этом месяце
+  const userCenterId = await getUserFitnessCenterThisMonth(userId);
   const slot = await prisma.fitnessSlot.findUnique({
     where: { id: slotId },
     include: { registrations: true }
   });
   if (!slot) return null;
   if (slot.registrations.length >= slot.capacity) return false;
+  if (userCenterId && slot.centerId !== userCenterId) return 'wrong_center';
+
   return prisma.fitnessRegistration.create({
     data: { slotId, userId }
   });
@@ -100,6 +107,23 @@ async function getAllFitnessRegistrationsWithDetails() {
   });
 }
 
+async function getUserFitnessCenterThisMonth(userId) {
+  const start = new Date();
+  start.setDate(1);
+  start.setHours(0,0,0,0);
+  const end = new Date(start);
+  end.setMonth(end.getMonth() + 1);
+  const reg = await prisma.fitnessRegistration.findFirst({
+    where: {
+      userId,
+      slot: { date: { gte: start, lt: end } }
+    },
+    include: { slot: true },
+    orderBy: { createdAt: 'asc' }
+  });
+  return reg ? reg.slot.centerId : null;
+}
+
 module.exports = {
   getAllFitnessCenters,
   getSlotsByCenter,
@@ -114,4 +138,5 @@ module.exports = {
   updateFitnessSlot,
   deleteFitnessSlot,
   getAllFitnessRegistrationsWithDetails,
+  getUserFitnessCenterThisMonth,
 }; 

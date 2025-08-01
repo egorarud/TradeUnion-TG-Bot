@@ -12,12 +12,11 @@ const {
 const userFitnessStates = {};
 
 async function handleFitnessCommand(ctx) {
-  const centers = await getAllFitnessCenters();
-  if (!centers.length) return ctx.reply('Нет доступных фитнес-центров.');
-  await ctx.reply('Выберите фитнес-центр:',
-    Markup.inlineKeyboard(
-      centers.map(c => [Markup.button.callback(c.name, `fitness_center_${c.id}`)])
-    )
+  await ctx.reply('Выберите действие:',
+    Markup.inlineKeyboard([
+      [Markup.button.callback('Мои записи', 'fitness_my_records')],
+      [Markup.button.callback('Записаться на тренировку', 'fitness_start_registration')]
+    ])
   );
 }
 
@@ -31,7 +30,7 @@ async function handleMyFitnessCommand(ctx) {
     const slot = reg.slot;
     const center = slot.center;
     const date = new Date(slot.date).toLocaleString('ru-RU');
-    let text = `Центр: ${center.name}\nТип: ${slot.type}\nДата: ${date}`;
+    let text = `*Центр:* ${center.name}\n*Тип:* ${slot.type}\n*Дата:* ${date}`;
     await ctx.replyWithMarkdown(text,
       Markup.inlineKeyboard([
         [Markup.button.callback('Отменить запись', `fitness_reg_cancel_${reg.id}`)]
@@ -51,8 +50,22 @@ module.exports = (bot) => {
   bot.action(/fitness_center_(\d+)/, async (ctx) => {
     const centerId = Number(ctx.match[1]);
     let slots = await getSlotsByCenter(centerId);
-    // Показываем только индивидуальные тренировки
-    slots = slots.filter(s => s.type === 'Индивидуальная');
+
+    // Получаем пользователя
+    let user = await prisma.user.findUnique({ where: { telegramId: String(ctx.from.id) } });
+    let userRegistrations = [];
+    if (user) {
+      userRegistrations = await getUserFitnessRegistrations(user.id);
+    }
+    const registeredSlotIds = new Set(userRegistrations.map(reg => reg.slot.id));
+
+    // Показываем только индивидуальные тренировки, если есть места и пользователь не записан
+    slots = slots.filter(
+      s => s.type === 'Индивидуальная' &&
+           s.registrations.length < s.capacity &&
+           !registeredSlotIds.has(s.id)
+    );
+
     if (!slots.length) return ctx.editMessageText('Нет доступных индивидуальных слотов в этом центре.');
     await ctx.editMessageText('Выберите дату и тип тренировки:',
       Markup.inlineKeyboard(
@@ -74,7 +87,6 @@ module.exports = (bot) => {
       `Подтвердите запись на тренировку "${slot.type}" в ${new Date(slot.date).toLocaleString('ru-RU')}?`,
       Markup.inlineKeyboard([
         [Markup.button.callback('Записаться', `fitness_confirm_${slotId}`)],
-        [Markup.button.callback('Отмена', 'fitness_cancel')]
       ])
     );
   });
@@ -106,7 +118,9 @@ module.exports = (bot) => {
       }
     }
     const reg = await registerUserForFitness(slotId, user.id);
-    if (reg === null) {
+    if (reg === 'wrong_center') {
+      return ctx.editMessageText('В этом месяце вы можете записываться только в тот фитнес-центр, в который уже записались первым.');
+    } else if (reg === null) {
       return ctx.editMessageText('Вы уже записаны в этом месяце на тренировку.');
     } else if (reg === false) {
       return ctx.editMessageText('Слот уже заполнен.');
@@ -174,6 +188,21 @@ module.exports = (bot) => {
     } else {
       ctx.reply('Не удалось отменить запись (возможно, она уже отменена или не принадлежит вам).');
     }
+  });
+
+  // Главное меню фитнеса
+  bot.action('fitness_my_records', async (ctx) => {
+    await handleMyFitnessCommand(ctx);
+  });
+
+  bot.action('fitness_start_registration', async (ctx) => {
+    const centers = await getAllFitnessCenters();
+    if (!centers.length) return ctx.editMessageText('Нет доступных фитнес-центров.');
+    await ctx.editMessageText('Выберите фитнес-центр:',
+      Markup.inlineKeyboard(
+        centers.map(c => [Markup.button.callback(c.name, `fitness_center_${c.id}`)])
+      )
+    );
   });
 };
 

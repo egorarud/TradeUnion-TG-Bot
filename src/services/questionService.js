@@ -37,4 +37,18 @@ async function getUserQuestionsCountToday(userTgId) {
   });
 }
 
-module.exports = { addQuestion, getUnansweredQuestions, answerQuestion, getQuestionById, getUserQuestionsCountToday };
+// Удалить вопросы, на которые был дан ответ более месяца назад
+async function deleteOldAnsweredQuestions() {
+  const monthAgo = new Date();
+  monthAgo.setMonth(monthAgo.getMonth() - 1);
+  return prisma.question.deleteMany({
+    where: {
+      answeredAt: {
+        not: null,
+        lt: monthAgo
+      }
+    }
+  });
+}
+
+module.exports = { addQuestion, getUnansweredQuestions, answerQuestion, getQuestionById, getUserQuestionsCountToday, deleteOldAnsweredQuestions };

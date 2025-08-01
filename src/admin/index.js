@@ -15,6 +15,7 @@ const {
   getAllFitnessRegistrationsWithDetails
 } = require('../services/fitnessService');
 const { getAllTopics, addTopic, addFaq } = require('../services/faqService');
+const { getUnansweredQuestions } = require('../services/questionService');
 const ExcelJS = require('exceljs');
 
 const adminStates = {};
@@ -352,10 +353,16 @@ module.exports = (bot) => {
     const slots = await getSlotsByCenter(centerId);
     await ctx.editMessageText('Слоты этого центра:',
       Markup.inlineKeyboard([
-        ...slots.map(s => [Markup.button.callback(
-          `${s.type} — ${new Date(s.date).toLocaleString('ru-RU')}`,
-          `admin_fitness_edit_slot_${s.id}`
-        )]),
+        ...slots.map(s => [
+          Markup.button.callback(
+            `✏️ ${s.type} — ${new Date(s.date).toLocaleString('ru-RU')}`,
+            `admin_fitness_edit_slot_${s.id}`
+          ),
+          Markup.button.callback(
+            '🗑️ Удалить',
+            `admin_fitness_delete_slot_${s.id}`
+          )
+        ]),
         [Markup.button.callback('➕ Добавить слот', `admin_fitness_add_slot_${centerId}`)]
       ])
     );
@@ -562,8 +569,15 @@ module.exports = (bot) => {
 
   bot.action('admin_questions', async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCbQuery('Нет доступа');
-    await ctx.editMessageText('Входящие вопросы пользователей (ответить/архивировать)');
-    // Здесь будет логика просмотра и ответа на вопросы
+    const questions = await getUnansweredQuestions();
+    if (!questions.length) {
+      return ctx.editMessageText('Нет входящих вопросов от пользователей.');
+    }
+    let msg = 'Входящие вопросы пользователей:\n\n';
+    questions.forEach((q, i) => {
+      msg += `${i + 1}. ${q.text}\nОт: ${q.userName || 'Неизвестно'}\n\n`;
+    });
+    await ctx.editMessageText(msg);
   });
 
   bot.action('admin_skip', async (ctx) => {
