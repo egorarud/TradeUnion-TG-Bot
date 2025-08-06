@@ -6,6 +6,7 @@ const prisma = require('../models');
 const { handleFitnessCommand, handleMyFitnessCommand } = require('./fitness');
 const { askGPT } = require('../services/openaiService');
 const faqService = require('../services/faqService');
+const logger = require('../utils/logger');
 
 const userStates = {};
 const adminStates = {};
@@ -28,6 +29,7 @@ const cancelMenu = Markup.keyboard([
 
 module.exports = (bot) => {
   bot.start(async (ctx) => {
+    logger.info(`User start: id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
     // Удаляем старые вопросы (старше месяца после ответа)
     await deleteOldAnsweredQuestions();
     ctx.reply(
@@ -43,6 +45,7 @@ module.exports = (bot) => {
   });
 
   bot.action('show_events', async (ctx) => {
+    logger.info(`User action: show_events, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
     ctx.answerCbQuery();
     await ctx.reply('Выберите действие:',
       Markup.inlineKeyboard([
@@ -54,6 +57,7 @@ module.exports = (bot) => {
 
   // Кнопка 'Мои мероприятия'
   bot.action('my_events', async (ctx) => {
+    logger.info(`User action: my_events, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
     ctx.answerCbQuery();
     let user = await require('../models').user.findUnique({ where: { telegramId: String(ctx.from.id) } });
     if (!user) {
@@ -79,6 +83,7 @@ module.exports = (bot) => {
 
   // Кнопка 'Предстоящие мероприятия'
   bot.action('upcoming_events', async (ctx) => {
+    logger.info(`User action: upcoming_events, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
     ctx.answerCbQuery();
     const events = await require('../services/eventService').getUpcomingEvents();
     if (!events.length) {
@@ -97,6 +102,7 @@ module.exports = (bot) => {
   });
 
   bot.action('show_privileges', async (ctx) => {
+    logger.info(`User action: show_privileges, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
     ctx.answerCbQuery();
     const privileges = await getAllPrivileges();
     if (!privileges.length) {
@@ -112,6 +118,7 @@ module.exports = (bot) => {
   });
 
   bot.action('ask_question', (ctx) => {
+    logger.info(`User action: ask_question, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
     ctx.answerCbQuery();
     ctx.reply('Пожалуйста, напишите свой вопрос одним сообщением.');
     userStates[ctx.from.id] = 'waiting_for_question';
@@ -120,6 +127,7 @@ module.exports = (bot) => {
   bot.on('text', async (ctx, next) => {
     // Пользователь задаёт вопрос
     if (userStates[ctx.from.id] === 'waiting_for_question') {
+      logger.info(`User question: id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}, text=${ctx.message.text}`);
       if (ctx.message.text === '❌ Отмена') {
         // Обработка отмены вынесена в отдельный hears, но на всякий случай дублируем защиту
         return;
@@ -150,6 +158,7 @@ module.exports = (bot) => {
       userStates[ctx.from.id] = undefined;
     } else if (adminStates[ctx.from.id] && adminStates[ctx.from.id].questionId) {
       // Админ отвечает на вопрос
+      logger.info(`Admin answer: id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}, text=${ctx.message.text}`);
       const { questionId } = adminStates[ctx.from.id];
       const question = await getQuestionById(questionId);
       if (!question) {
@@ -243,6 +252,86 @@ module.exports = (bot) => {
     });
     await ctx.reply('Если передумали, нажмите "Отмена".', cancelInlineKeyboard);
     userStates[ctx.from.id] = 'waiting_for_question';
+  });
+  bot.hears('🔔 Напоминания', async (ctx) => {
+    await ctx.reply(
+      'Настройки напоминаний:\n\n' +
+      '1. Включить/выключить напоминания\n' +
+      '2. Выбрать тип события (Фитнес или Мероприятия)\n' +
+      '3. Указать за сколько времени до события напомнить',
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('Включить', 'reminder_enable'),
+          Markup.button.callback('Выключить', 'reminder_disable')
+        ],
+        [
+          Markup.button.callback('Фитнес', 'reminder_type_fitness'),
+          Markup.button.callback('Мероприятия', 'reminder_type_event')
+        ],
+        [
+          Markup.button.callback('За 1 день', 'reminder_time_1440'),
+          Markup.button.callback('За 3 часа', 'reminder_time_180'),
+          Markup.button.callback('За 1 час', 'reminder_time_60')
+        ]
+      ])
+    );
+  });
+
+  bot.action('reminder_enable', async (ctx) => {
+    await prisma.user.update({
+      where: { telegramId: String(ctx.from.id) },
+      data: { reminderEnabled: true }
+    });
+    await ctx.answerCbQuery('Напоминания включены!');
+    await ctx.reply('Напоминания включены.');
+  });
+  bot.action('reminder_disable', async (ctx) => {
+    await prisma.user.update({
+      where: { telegramId: String(ctx.from.id) },
+      data: { reminderEnabled: false }
+    });
+    await ctx.answerCbQuery('Напоминания выключены!');
+    await ctx.reply('Напоминания выключены.');
+  });
+  bot.action('reminder_type_fitness', async (ctx) => {
+    await prisma.user.update({
+      where: { telegramId: String(ctx.from.id) },
+      data: { reminderType: 'fitness' }
+    });
+    await ctx.answerCbQuery('Тип напоминаний: Фитнес');
+    await ctx.reply('Будут напоминания только о фитнес-мероприятиях.');
+  });
+  bot.action('reminder_type_event', async (ctx) => {
+    await prisma.user.update({
+      where: { telegramId: String(ctx.from.id) },
+      data: { reminderType: 'event' }
+    });
+    await ctx.answerCbQuery('Тип напоминаний: Мероприятия');
+    await ctx.reply('Будут напоминания только о мероприятиях.');
+  });
+  bot.action('reminder_time_1440', async (ctx) => {
+    await prisma.user.update({
+      where: { telegramId: String(ctx.from.id) },
+      data: { reminderTime: 1440 }
+    });
+    await ctx.answerCbQuery('Напоминать за 1 день');
+    await ctx.reply('Напоминания будут приходить за 1 день до события.');
+  });
+  bot.action('reminder_time_180', async (ctx) => {
+    await prisma.user.update({
+      where: { telegramId: String(ctx.from.id) },
+      data: { reminderTime: 180 }
+    });
+    await ctx.answerCbQuery('Напоминать за 3 часа');
+    await ctx.reply('Напоминания будут приходить за 3 часа до события.');
+  });
+  bot.action('reminder_time_60', async (ctx) => {
+    await prisma.user.update({
+      where: { telegramId: String(ctx.from.id) },
+      data: { reminderTime: 60 }
+    });
+    await ctx.answerCbQuery('Напоминать за 1 час');
+    await ctx.reply('Напоминания будут приходить за 1 час до события.');
   });
 
   bot.action('cancel_question', async (ctx) => {

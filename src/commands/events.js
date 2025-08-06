@@ -1,12 +1,14 @@
 const { Markup } = require('telegraf');
 const { getUpcomingEvents, getEventById, registerUserForEvent, getUserUpcomingRegistrations, cancelRegistration } = require('../services/eventService');
 const prisma = require('../models');
+const logger = require('../utils/logger');
 
 const userEventStates = {};
 
 module.exports = (bot) => {
   // Команда /events
   bot.command('events', async (ctx) => {
+    logger.info(`User command: /events, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
     const events = await getUpcomingEvents();
     if (!events.length) {
       return ctx.reply('Ближайших мероприятий нет.');
@@ -24,6 +26,7 @@ module.exports = (bot) => {
 
   // Кнопка "Записаться"
   bot.action(/register_event_(\d+)/, async (ctx) => {
+    logger.info(`User action: register_event, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}, eventId=${ctx.match[1]}`);
     ctx.answerCbQuery();
     const eventId = Number(ctx.match[1]);
     const event = await getEventById(eventId);
@@ -46,6 +49,7 @@ module.exports = (bot) => {
   // Обработка комментария к записи
   bot.on('text', async (ctx, next) => {
     if (userEventStates[ctx.from.id] && userEventStates[ctx.from.id].eventId) {
+      logger.info(`User event comment: id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}, eventId=${userEventStates[ctx.from.id].eventId}, text=${ctx.message.text}`);
       const { eventId } = userEventStates[ctx.from.id];
       let user = await prisma.user.findUnique({ where: { telegramId: String(ctx.from.id) } });
       if (!user) return ctx.reply('Ошибка пользователя.');
@@ -64,6 +68,7 @@ module.exports = (bot) => {
 
   // Команда /my_events
   bot.command('my_events', async (ctx) => {
+    logger.info(`User command: /my_events, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
     let user = await prisma.user.findUnique({ where: { telegramId: String(ctx.from.id) } });
     if (!user) {
       return ctx.reply('Вы ещё не записаны ни на одно мероприятие.');
@@ -88,6 +93,7 @@ module.exports = (bot) => {
 
   // Кнопка отмены записи
   bot.action(/cancel_reg_(\d+)/, async (ctx) => {
+    logger.info(`User action: cancel_reg, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}, regId=${ctx.match[1]}`);
     ctx.answerCbQuery();
     let user = await prisma.user.findUnique({ where: { telegramId: String(ctx.from.id) } });
     if (!user) return ctx.reply('Ошибка пользователя.');

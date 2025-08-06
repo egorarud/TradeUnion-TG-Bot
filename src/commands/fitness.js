@@ -8,6 +8,7 @@ const {
   registerUserForFitness,
   cancelFitnessRegistration
 } = require('../services/fitnessService');
+const logger = require('../utils/logger');
 
 const userFitnessStates = {};
 
@@ -41,13 +42,20 @@ async function handleMyFitnessCommand(ctx) {
 
 module.exports = (bot) => {
   // Команда /fitness
-  bot.command('fitness', handleFitnessCommand);
+  bot.command('fitness', (ctx) => {
+    logger.info(`User command: /fitness, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
+    handleFitnessCommand(ctx);
+  });
 
   // Команда /my_fitness
-  bot.command('my_fitness', handleMyFitnessCommand);
+  bot.command('my_fitness', (ctx) => {
+    logger.info(`User command: /my_fitness, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}`);
+    handleMyFitnessCommand(ctx);
+  });
 
   // Выбор центра
   bot.action(/fitness_center_(\d+)/, async (ctx) => {
+    logger.info(`User action: fitness_center, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}, centerId=${ctx.match[1]}`);
     const centerId = Number(ctx.match[1]);
     let slots = await getSlotsByCenter(centerId);
 
@@ -79,6 +87,7 @@ module.exports = (bot) => {
 
   // Выбор слота
   bot.action(/fitness_slot_(\d+)/, async (ctx) => {
+    logger.info(`User action: fitness_slot, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}, slotId=${ctx.match[1]}`);
     const slotId = Number(ctx.match[1]);
     const slot = await getSlotById(slotId);
     if (!slot) return ctx.editMessageText('Слот не найден.');
@@ -93,6 +102,7 @@ module.exports = (bot) => {
 
   // Подтверждение записи
   bot.action(/fitness_confirm_(\d+)/, async (ctx) => {
+    logger.info(`User action: fitness_confirm, id=${ctx.from.id}, name=${ctx.from.first_name || ''} ${ctx.from.last_name || ''}, username=${ctx.from.username || ''}, slotId=${ctx.match[1]}`);
     const slotId = Number(ctx.match[1]);
     let user = await prisma.user.findUnique({ where: { telegramId: String(ctx.from.id) } });
     if (!user) {
