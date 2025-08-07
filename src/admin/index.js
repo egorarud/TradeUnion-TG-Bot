@@ -1,5 +1,6 @@
 const { Markup } = require('telegraf');
-const ADMIN_IDS = [1068642847]; // Замените на реальные Telegram ID админов
+require('dotenv').config();
+const ADMIN_IDS = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',').map(id => Number(id.trim())) : [];
 const { createEvent, getUpcomingEvents, getEventById, updateEvent, getEventRegistrationsWithUsers } = require('../services/eventService');
 const { getAllPrivileges, createPrivilege, updatePrivilege } = require('../services/privilegeService');
 const {

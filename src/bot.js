@@ -9,6 +9,12 @@ const { startReminderScheduler } = require('./services/reminderService');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
+// Команда для получения chat.id (можно использовать в группе)
+bot.command('chatid', (ctx) => {
+  ctx.reply('chat.id: ' + ctx.chat.id);
+  console.log('chat.id:', ctx.chat.id);
+});
+
 // Обработка любого первого сообщения пользователя
 // В приветствии и при регистрации используем только mainMenu
 bot.on('message', async (ctx, next) => {

@@ -148,11 +148,19 @@ module.exports = (bot) => {
       const adminIds = process.env.ADMIN_IDS ? process.env.ADMIN_IDS.split(',') : [];
       const msg = `Вопрос #${question.id} от @${user.username || '-'} (id: ${user.id}):\n${ctx.message.text}`;
       for (const adminId of adminIds) {
+        await ctx.telegram.sendMessage(adminId, msg, {
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Ответить', callback_data: `answer_${question.id}` }]]
+          }
+        });
+      }
+      // Пересылка в группу, если задан GROUP_CHAT_ID
+      if (process.env.GROUP_CHAT_ID) {
         try {
-          await ctx.telegram.sendMessage(adminId, msg, Markup.inlineKeyboard([
-            [Markup.button.callback('Ответить', `answer_${question.id}`)]
-          ]));
-        } catch (e) {}
+          await ctx.telegram.sendMessage(process.env.GROUP_CHAT_ID, `Вопрос от пользователя @${user.username || user.id}:\n${ctx.message.text}`);
+        } catch (e) {
+          logger.error('Ошибка при отправке вопроса в группу: ' + e.message);
+        }
       }
       await ctx.reply('Ваш вопрос отправлен администрации. Спасибо!', mainMenu);
       userStates[ctx.from.id] = undefined;
